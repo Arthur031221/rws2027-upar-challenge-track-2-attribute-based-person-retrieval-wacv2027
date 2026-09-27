@@ -19,7 +19,11 @@ attributes.
    horizontal flip.
 3. Query score: Bernoulli log-likelihood of the query vector,
    `sum_a q_a log p_a + (1 - q_a) log(1 - p_a)`, computed as two matrix
-   products (no Q x G x 40 tensor). Returned as `similarities`.
+   products (no Q x G x 40 tensor), with logits divided by a temperature of
+   1.5. For a query with exactly one positive in a mutually exclusive group
+   (age, hair length, upper colour, lower colour, lower-body type), half of
+   that group's score is the categorical log-probability of the positive,
+   with the sigmoids renormalised over the group. Returned as `similarities`.
 
 ## Local validation
 
@@ -30,10 +34,15 @@ as a query and reproduces the metrics of the Evaluation page (`src/retrieval.py`
 | scorer | val all | Market1501 | PA100k | PETA |
 |---|---|---|---|---|
 | L1 on probabilities (organiser recipe) | 0.6568 | 0.6782 | 0.6369 | 0.6825 |
-| log-likelihood (submitted) | 0.6985 | 0.7161 | 0.6664 | 0.7395 |
+| log-likelihood | 0.6985 | 0.7161 | 0.6664 | 0.7395 |
+| log-likelihood, T 1.5, group weight 0.5 (submitted) | 0.7012 | 0.7223 | 0.6740 | 0.7402 |
 
-Temperature scaling (T 1.5, 2) and adding expected attribute agreement to the
-log-likelihood did not help on val.
+The val split shares domains with the training data, so the temperature and
+group weight were chosen on leave-one-source-out models instead (a ConvNeXt-S
+trained without Market1501, and one without PETA, each scored on the held-out
+source's val gallery). There the change moves mADM from 0.6422 to 0.6488 on
+Market1501 and from 0.5277 to 0.5386 on PETA. Per-attribute temperatures and a
+full group softmax (weight 1) lowered both held-out scores.
 
 ## Reproduce
 

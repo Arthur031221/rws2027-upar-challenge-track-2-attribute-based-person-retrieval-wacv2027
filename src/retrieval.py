@@ -9,17 +9,43 @@ import torch
 import torch.nn.functional as F
 
 
-def loglik_scores(q: torch.Tensor, z: torch.Tensor, temp: float = 1.0, alpha: float = 0.0) -> torch.Tensor:
+# Mutually exclusive attribute groups in the 40-attribute layout: age, hair
+# length, upper colour, lower colour, lower-body type.
+GROUPS = [[0, 1, 2], [4, 5, 6], list(range(8, 20)), list(range(21, 33)), [33, 34]]
+
+
+def _bernoulli(q: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    return q @ F.logsigmoid(z).T + (1 - q) @ F.logsigmoid(-z).T
+
+
+def loglik_scores(q: torch.Tensor, z: torch.Tensor, temp: float = 1.0, alpha: float = 0.0,
+                  group_weight: float = 0.0) -> torch.Tensor:
     """Similarity of every query to every gallery image, (Q, G).
 
     q: (Q, 40) binary queries, z: (G, 40) attribute logits.
     Bernoulli log-likelihood of the query vector under the predicted
     probabilities sigmoid(z / temp), plus alpha times the expected number of
     agreeing attributes (the degree of match that mADM credits for near misses).
+
+    With group_weight > 0, a query with exactly one positive in a mutually
+    exclusive group scores that group as a mix of the categorical
+    log-probability of the positive (sigmoids renormalised over the group) and
+    the independent Bernoulli terms, weighted group_weight and 1 - group_weight.
     """
     q = q.float(); z = z.float() / temp
-    lp, ln = F.logsigmoid(z), F.logsigmoid(-z)
-    s = q @ lp.T + (1 - q) @ ln.T
+    if group_weight:
+        grouped = {j for g in GROUPS for j in g}
+        solo = [j for j in range(q.shape[1]) if j not in grouped]
+        s = _bernoulli(q[:, solo], z[:, solo])
+        for g in GROUPS:
+            qg, zg = q[:, g], z[:, g]
+            b = _bernoulli(qg, zg)
+            lp = F.logsigmoid(zg)
+            cat = qg @ (lp - torch.logsumexp(lp, 1, keepdim=True)).T
+            one = (qg.sum(1, keepdim=True) == 1).float()
+            s = s + one * (group_weight * cat + (1 - group_weight) * b) + (1 - one) * b
+    else:
+        s = _bernoulli(q, z)
     if alpha:
         p = torch.sigmoid(z)
         s = s + alpha * (q @ p.T + (1 - q) @ (1 - p).T)

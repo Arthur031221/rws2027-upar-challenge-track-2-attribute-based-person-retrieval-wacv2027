@@ -68,7 +68,8 @@ def rank_gallery(sample: dict) -> dict:
     order = [names.index(n) for n in sample["attribute_names"]]
     z = gallery_logits(sample["gallery"])[:, order]
     q = torch.as_tensor(np.asarray(sample["queries"], dtype=np.float32), device=_DEV)
-    sims = [loglik_scores(q[i:i + 256], z, _CFG.get("temp", 1.0), _CFG.get("alpha", 0.0)).cpu()
+    sims = [loglik_scores(q[i:i + 256], z, _CFG.get("temp", 1.0), _CFG.get("alpha", 0.0),
+                          _CFG.get("group_weight", 0.0)).cpu()
             for i in range(0, len(q), 256)]
     s = torch.cat(sims).numpy().astype(np.float32)
     print(f"similarities {s.shape}", flush=True)
