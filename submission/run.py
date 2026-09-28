@@ -8,8 +8,11 @@ probabilities. Only torch, torchvision, numpy and Pillow are used.
 Images are resized to h x w as in training and, for a ViT, resampled to the
 model's input grid the same way the training loop does. The platform allows
 one hour for the whole run, so after every batch the projected finish time is
-checked against BUDGET_S and, if it is over, inference steps down one mode:
-first no flip, then int8 dynamic quantisation of the linear layers (CPU only).
+checked against BUDGET_S and, if it is over, flip averaging is dropped.
+
+The worker's memory cap is about 2 GB. Weights are memory-mapped into a model
+built on the meta device; on a GPU they run in float32 with bfloat16 autocast,
+on the CPU the linear layers are quantised to int8 at load time.
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ BUDGET_S = 2700.0  # of the 3600 s limit, leaving room for start-up and scoring
 _NETS: list = []  # (net, normalise, input size or None)
 _CFG: dict = {}
 _DEV = "cpu"
-_MODES = ("full", "noflip", "int8")
+_MODES = ("full", "noflip")
 _T0 = [0.0]
 
 
@@ -58,25 +61,41 @@ def load_model() -> None:
         torch.set_num_threads(os.cpu_count() or 1)
     _CFG = json.load(open(os.path.join(HERE, "config.json")))
     for m in _CFG["models"]:
-        net = build(m["arch"])
-        sd = torch.load(os.path.join(HERE, m["weights"]), map_location="cpu")
-        net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in sd.items()})
-        _NETS.append((net.to(_DEV).eval(), Normalize(m["arch"]).to(_DEV), input_size(m["arch"])))
+        # Weights are memory-mapped and assigned into a model built on the meta
+        # device, so host memory holds about one copy of the float16 weights.
+        sd = torch.load(os.path.join(HERE, m["weights"]), map_location="cpu", mmap=True, weights_only=True)
+        with torch.device("meta"):
+            net = build(m["arch"])
+        net.load_state_dict(sd, assign=True)
+        net.eval()
+        net = net.to("cuda", torch.float32) if _DEV == "cuda" else _int8(net)
+        _NETS.append((net, Normalize(m["arch"]).to(_DEV), input_size(m["arch"])))
 
 
 def _load(path: str, w: int, h: int) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB").resize((w, h), Image.BILINEAR)).transpose(2, 0, 1)
 
 
-def _quantise() -> None:
-    for i, (net, norm, size) in enumerate(_NETS):
-        _NETS[i] = (torch.ao.quantization.quantize_dynamic(net, {torch.nn.Linear}, dtype=torch.qint8), norm, size)
+def _int8(net: torch.nn.Module) -> torch.nn.Module:
+    """float32 then int8 dynamic quantisation of the linear layers, one child at a time."""
+    for name, child in list(net.named_children()):
+        if isinstance(child, torch.nn.Sequential):
+            for i in range(len(child)):
+                child[i] = torch.ao.quantization.quantize_dynamic(child[i].float(), {torch.nn.Linear}, dtype=torch.qint8)
+        else:
+            q = child.float()
+            if any(isinstance(x, torch.nn.Linear) for x in q.modules()):
+                q = torch.ao.quantization.quantize_dynamic(q, {torch.nn.Linear}, dtype=torch.qint8)
+            setattr(net, name, q)
+    for p in net.parameters(recurse=False):
+        p.data = p.data.float()
+    return net
 
 
 @torch.no_grad()
 def gallery_logits(gallery: list[dict]) -> torch.Tensor:
     h, w = _CFG["h"], _CFG["w"]
-    last = len(_MODES) - 1 if _DEV == "cpu" else _MODES.index("noflip")  # int8 kernels are CPU only
+    last = len(_MODES) - 1
     mode, out, t0 = 0, [], time.time()
     with ThreadPoolExecutor(8) as pool:
         for i in range(0, len(gallery), BATCH_SIZE):
@@ -95,8 +114,6 @@ def gallery_logits(gallery: list[dict]) -> torch.Tensor:
             per_image = (time.time() - tb) / len(x)
             if left > 0 and mode < last and time.time() - _T0[0] + left * per_image > BUDGET_S:
                 mode += 1
-                if _MODES[mode] == "int8":
-                    _quantise()
                 print(f"step down to {_MODES[mode]} at {i + len(x)} images", flush=True)
             if (i // BATCH_SIZE) % 50 == 0:
                 print(f"gallery {i + len(x)}/{len(gallery)} {time.time() - t0:.0f}s", flush=True)
