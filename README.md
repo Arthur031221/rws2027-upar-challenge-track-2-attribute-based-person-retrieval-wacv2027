@@ -30,6 +30,11 @@ attributes.
    gallery images that match the training prior rather than the query. On
    held-out sources with a ViT-B/16 model it moved mADM from 0.7010 to 0.7020
    (Market1501) and 0.6253 to 0.6269 (PETA).
+5. Weights may be stored as int8 with one float16 scale per output row
+   (keys ending in `.__q` and `.__s`); `run.py` restores them to float16 at
+   load. This keeps the archive at 77 MB; every archive above 99 MB has
+   failed on the evaluation worker so far. On 640 PETA val images the int8 ViT-B/16 gives mAP 0.7487 against
+   0.7497 in float16.
 
 ## Local validation
 

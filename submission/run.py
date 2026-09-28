@@ -73,7 +73,7 @@ def _load_nets(models: list[dict]) -> list:
     for m in models:
         # Weights are memory-mapped and assigned into a model built on the meta
         # device, so host memory holds about one copy of the float16 weights.
-        sd = torch.load(os.path.join(HERE, m["weights"]), map_location="cpu", mmap=True, weights_only=True)
+        sd = _dequant(torch.load(os.path.join(HERE, m["weights"]), map_location="cpu", mmap=True, weights_only=True))
         with torch.device("meta"):
             net = build(m["arch"])
         net.load_state_dict(sd, assign=True)
@@ -86,6 +86,17 @@ def _load_nets(models: list[dict]) -> list:
             net = net.float()
         nets.append((net, Normalize(m["arch"]).to(_DEV), input_size(m["arch"])))
     return nets
+
+
+def _dequant(sd: dict) -> dict:
+    """Weights stored as int8 with one float16 scale per output row go back to float16."""
+    out = {}
+    for k, v in sd.items():
+        if k.endswith(".__q"):
+            out[k[:-4]] = (v.float() * sd[k[:-4] + ".__s"].float()).half()
+        elif not k.endswith(".__s"):
+            out[k] = v
+    return out
 
 
 def _load(path: str, w: int, h: int) -> np.ndarray:
