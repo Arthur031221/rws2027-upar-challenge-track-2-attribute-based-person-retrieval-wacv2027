@@ -8,11 +8,15 @@ probabilities. Only torch, torchvision, numpy and Pillow are used.
 Images are resized to h x w as in training and, for a ViT, resampled to the
 model's input grid the same way the training loop does. The platform allows
 one hour for the whole run, so after every batch the projected finish time is
-checked against BUDGET_S and, if it is over, flip averaging is dropped.
+checked against BUDGET_S and, if it is over, flip averaging is dropped. If the
+config names fallback models and the projection is still over budget after a
+few batches without flip, the gallery restarts from the first image on the
+fallback models, so every gallery image is scored by the same models.
 
 The worker's memory cap is about 2 GB. Weights are memory-mapped into a model
 built on the meta device; on a GPU they run in float32 with bfloat16 autocast,
-on the CPU the linear layers are quantised to int8 at load time.
+on the CPU the linear layers are quantised to int8 at load time unless the
+config sets "cpu_int8" to false.
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ from retrieval import loglik_scores
 HERE = os.path.dirname(os.path.abspath(__file__))
 BATCH_SIZE = 64
 BUDGET_S = 2700.0  # of the 3600 s limit, leaving room for start-up and scoring
+PROBE_BATCHES = 3  # batches timed before giving up on the primary models
 
 _NETS: list = []  # (net, normalise, input size or None)
 _CFG: dict = {}
@@ -60,7 +65,12 @@ def load_model() -> None:
     if _DEV == "cpu":
         torch.set_num_threads(os.cpu_count() or 1)
     _CFG = json.load(open(os.path.join(HERE, "config.json")))
-    for m in _CFG["models"]:
+    _NETS.extend(_load_nets(_CFG["models"]))
+
+
+def _load_nets(models: list[dict]) -> list:
+    nets = []
+    for m in models:
         # Weights are memory-mapped and assigned into a model built on the meta
         # device, so host memory holds about one copy of the float16 weights.
         sd = torch.load(os.path.join(HERE, m["weights"]), map_location="cpu", mmap=True, weights_only=True)
@@ -68,8 +78,14 @@ def load_model() -> None:
             net = build(m["arch"])
         net.load_state_dict(sd, assign=True)
         net.eval()
-        net = net.to("cuda", torch.float32) if _DEV == "cuda" else _int8(net)
-        _NETS.append((net, Normalize(m["arch"]).to(_DEV), input_size(m["arch"])))
+        if _DEV == "cuda":
+            net = net.to("cuda", torch.float32)
+        elif _CFG.get("cpu_int8", True):
+            net = _int8(net)
+        else:
+            net = net.float()
+        nets.append((net, Normalize(m["arch"]).to(_DEV), input_size(m["arch"])))
+    return nets
 
 
 def _load(path: str, w: int, h: int) -> np.ndarray:
@@ -92,29 +108,48 @@ def _int8(net: torch.nn.Module) -> torch.nn.Module:
     return net
 
 
-@torch.no_grad()
+class _Restart(Exception):
+    pass
+
+
 def gallery_logits(gallery: list[dict]) -> torch.Tensor:
-    h, w = _CFG["h"], _CFG["w"]
+    try:
+        return _gallery_logits(gallery, _NETS, _CFG, bool(_CFG.get("fallback")))
+    except _Restart:
+        fb = _CFG["fallback"]
+        _NETS[:] = []  # free the primary models before loading the fallback
+        _NETS.extend(_load_nets(fb["models"]))
+        print("restart on the fallback models", flush=True)
+        return _gallery_logits(gallery, _NETS, {**_CFG, **fb}, False)
+
+
+@torch.no_grad()
+def _gallery_logits(gallery: list[dict], nets: list, cfg: dict, can_restart: bool) -> torch.Tensor:
+    h, w = cfg["h"], cfg["w"]
     last = len(_MODES) - 1
-    mode, out, t0 = 0, [], time.time()
+    mode = 0 if cfg.get("flip", True) else last
+    out, t0 = [], time.time()
     with ThreadPoolExecutor(8) as pool:
         for i in range(0, len(gallery), BATCH_SIZE):
             tb = time.time()
             x = np.stack(list(pool.map(lambda g: _load(g["image_path"], w, h), gallery[i:i + BATCH_SIZE])))
             xr = torch.from_numpy(x).to(_DEV)
             z = 0
-            for net, norm, size in _NETS:
+            for net, norm, size in nets:
                 xb = norm(xr if size is None else
                           F.interpolate(xr.float(), size=size, mode="bilinear", antialias=True, align_corners=False))
                 with torch.autocast(_DEV, dtype=torch.bfloat16, enabled=_DEV == "cuda"):
                     zb = net(xb).float()
                     z = z + ((zb + net(xb.flip(3)).float()) / 2 if mode == 0 else zb)
-            out.append((z / len(_NETS)).float())
+            out.append((z / len(nets)).float())
             left = len(gallery) - i - len(x)
             per_image = (time.time() - tb) / len(x)
-            if left > 0 and mode < last and time.time() - _T0[0] + left * per_image > BUDGET_S:
+            over = time.time() - _T0[0] + left * per_image > BUDGET_S
+            if left > 0 and mode < last and over:
                 mode += 1
                 print(f"step down to {_MODES[mode]} at {i + len(x)} images", flush=True)
+            elif left > 0 and mode == last and over and can_restart and i // BATCH_SIZE < PROBE_BATCHES:
+                raise _Restart
             if (i // BATCH_SIZE) % 50 == 0:
                 print(f"gallery {i + len(x)}/{len(gallery)} {time.time() - t0:.0f}s", flush=True)
     return torch.cat(out)
