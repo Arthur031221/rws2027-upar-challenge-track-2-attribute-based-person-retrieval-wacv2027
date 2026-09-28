@@ -143,12 +143,13 @@ def main():
     xtr, ytr, ntr = split("train", a.h, a.w)
     xva, yva, nva = split("val", a.h, a.w)
     if a.trainval or a.holdout:
-        xtr = np.concatenate([xtr, xva]); ytr = np.concatenate([ytr, yva]); ntr = np.concatenate([ntr, nva])
-        del xva
+        xtr = Rows.of(xtr, xva); ytr = np.concatenate([ytr, yva]); ntr = np.concatenate([ntr, nva])
+    else:
+        xtr, xva = Rows.of(xtr), Rows.of(xva)
     if a.holdout:
         ho = np.array([n.split("/")[0] == a.holdout for n in ntr])
-        xva, yva, nva = xtr[ho], ytr[ho], ntr[ho]
-        xtr, ytr, ntr = xtr[~ho], ytr[~ho], ntr[~ho]
+        xva, yva, nva = xtr.subset(ho), ytr[ho], ntr[ho]
+        xtr, ytr, ntr = xtr.subset(~ho), ytr[~ho], ntr[~ho]
     size = input_size(a.arch); vit = size is not None
     rate = torch.tensor(ytr.mean(0)).cuda()
     wpos, wneg = torch.exp(1 - rate), torch.exp(rate)
@@ -173,13 +174,13 @@ def main():
     steps = a.epochs * (len(xtr) // a.bs); warm = 500
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: min(1, (s + 1) / warm) * 0.5 * (1 + math.cos(math.pi * min(s, steps) / steps)))
-    xt = torch.from_numpy(xtr).pin_memory(); yt = torch.from_numpy(ytr)
+    xt = xtr; yt = torch.from_numpy(ytr)
     best, log, step = -1, [], 0
     for ep in range(a.epochs):
         net.train(); t0 = time.time(); perm = torch.randperm(len(xt)); tot = 0
         for i in range(len(xt) // a.bs):
             idx = perm[i * a.bs:(i + 1) * a.bs]
-            xb = resize(augment(xt[idx].cuda(non_blocking=True), pad=8), size)
+            xb = resize(augment(torch.from_numpy(xt[idx.numpy()]).cuda(non_blocking=True), pad=8), size)
             yb = yt[idx].cuda(non_blocking=True); mb = mt[idx].cuda(non_blocking=True)
             ys = yb * (1 - a.ls) + 0.5 * a.ls
             with torch.autocast("cuda", dtype=torch.bfloat16):
