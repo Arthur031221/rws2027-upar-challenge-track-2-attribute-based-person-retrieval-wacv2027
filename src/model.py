@@ -12,8 +12,14 @@ MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
-# ViT input size (h, w) and timm name; images are resized from the 256x128 cache to this.
-VIT = {"vit_l14_clip": ("vit_large_patch14_clip_224.openai", (224, 112), 14, 1024, 24, 16)}
+# timm name, ViT input size (h, w), patch, width, depth, heads, QuickGELU; images are resized
+# from the 256x128 cache to the input size. vit_l14_clip keeps plain GELU so the checkpoints
+# trained with it stay loadable, although the original CLIP weights use QuickGELU.
+VIT = {
+    "vit_l14_clip": ("vit_large_patch14_clip_224.openai", (224, 112), 14, 1024, 24, 16, False),
+    "vit_b16_clip": ("vit_base_patch16_clip_quickgelu_224.openai", (224, 112), 16, 768, 12, 12, True),
+    "vit_l14_dfn": ("vit_large_patch14_clip_quickgelu_224.dfn2b", (224, 112), 14, 1024, 24, 16, True),
+}
 
 
 def build(arch: str, pretrained: bool = False, drop_path: float = 0.0) -> nn.Module:
@@ -24,13 +30,13 @@ def build(arch: str, pretrained: bool = False, drop_path: float = 0.0) -> nn.Mod
         m.classifier[2] = nn.Linear(d, 40)
         return m
     if arch in VIT:
-        name, size, patch, dim, depth, heads = VIT[arch]
+        name, size, patch, dim, depth, heads, quick_gelu = VIT[arch]
         grid = (size[0] // patch, size[1] // patch)
         if pretrained:
             import timm
             return timm.create_model(name, pretrained=True, img_size=size, num_classes=40, drop_path_rate=drop_path)
         from vit import ViT
-        return ViT(grid, patch, dim, depth, heads)
+        return ViT(grid, patch, dim, depth, heads, quick_gelu=quick_gelu)
     raise ValueError(arch)
 
 

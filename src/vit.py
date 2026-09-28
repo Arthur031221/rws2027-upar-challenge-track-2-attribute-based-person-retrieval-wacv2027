@@ -25,11 +25,16 @@ class Attention(nn.Module):
         return self.proj(x.transpose(1, 2).reshape(b, n, c))
 
 
+class QuickGELU(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(1.702 * x)
+
+
 class Mlp(nn.Module):
-    def __init__(self, dim: int, hidden: int):
+    def __init__(self, dim: int, hidden: int, quick_gelu: bool = False):
         super().__init__()
         self.fc1 = nn.Linear(dim, hidden)
-        self.act = nn.GELU()
+        self.act = QuickGELU() if quick_gelu else nn.GELU()
         self.fc2 = nn.Linear(hidden, dim)
 
     def forward(self, x):
@@ -37,12 +42,12 @@ class Mlp(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, dim: int, heads: int):
+    def __init__(self, dim: int, heads: int, quick_gelu: bool = False):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
         self.attn = Attention(dim, heads)
         self.norm2 = nn.LayerNorm(dim)
-        self.mlp = Mlp(dim, dim * 4)
+        self.mlp = Mlp(dim, dim * 4, quick_gelu)
 
     def forward(self, x):
         x = x + self.attn(self.norm1(x))
@@ -57,13 +62,13 @@ class PatchEmbed(nn.Module):
 
 class ViT(nn.Module):
     def __init__(self, grid: tuple[int, int], patch: int = 14, dim: int = 1024, depth: int = 24,
-                 heads: int = 16, num_classes: int = 40):
+                 heads: int = 16, num_classes: int = 40, quick_gelu: bool = False):
         super().__init__()
         self.patch_embed = PatchEmbed(patch, dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, 1 + grid[0] * grid[1], dim))
         self.norm_pre = nn.LayerNorm(dim)
-        self.blocks = nn.Sequential(*[Block(dim, heads) for _ in range(depth)])
+        self.blocks = nn.Sequential(*[Block(dim, heads, quick_gelu) for _ in range(depth)])
         self.norm = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, num_classes)
 
