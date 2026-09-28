@@ -24,6 +24,12 @@ attributes.
    (age, hair length, upper colour, lower colour, lower-body type), half of
    that group's score is the categorical log-probability of the positive,
    with the sigmoids renormalised over the group. Returned as `similarities`.
+4. Optional prior shift (`--prior-shift 0.5`): before scoring, subtract
+   `lam * (1 - 2 r_a)` from each logit, where `r_a` is attribute a's rate in
+   the training labels. It reduces the pull of frequent attributes toward
+   gallery images that match the training prior rather than the query. On
+   held-out sources with a ViT-B/16 model it moved mADM from 0.7010 to 0.7020
+   (Market1501) and 0.6253 to 0.6269 (PETA).
 
 ## Local validation
 
@@ -51,6 +57,9 @@ cd src
 python val_eval.py --ckpt <track1 checkpoint> --arch convnext_small \
     --cache <val image cache 256x128 .npy> --ann <starter>/data/annotations/task2/val --out ../runs/val
 python make_submission.py --ckpt <track1 checkpoint> --arch convnext_small --out ../runs/sub
+# with the log-likelihood settings above and the prior shift
+python make_submission.py --ckpt <track1 checkpoint> --arch convnext_small --temp 1.5 --group-weight 0.5 \
+    --prior-shift 0.5 --train-csv <starter>/data/annotations/task1/{train,val}/gt.csv --out ../runs/sub
 # upload ../runs/sub.zip (run.py at the archive root)
 ```
 

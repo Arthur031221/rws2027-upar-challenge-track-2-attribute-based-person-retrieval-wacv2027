@@ -35,6 +35,10 @@ def main():
     ap.add_argument("--w", type=int, default=128)
     ap.add_argument("--temp", type=float, default=1.0)
     ap.add_argument("--alpha", type=float, default=0.0)
+    ap.add_argument("--group-weight", type=float, default=0.0)
+    ap.add_argument("--prior-shift", type=float, default=0.0,
+                    help="lam: subtract lam * (1 - 2 r) from the logits, r = attribute rate in --train-csv")
+    ap.add_argument("--train-csv", nargs="*", default=[], help="Track 1 gt.csv files the model was trained on")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out); shutil.rmtree(out, ignore_errors=True); out.mkdir(parents=True)
@@ -47,8 +51,15 @@ def main():
         sd = torch.load(c, map_location="cpu")
         torch.save({k: v.half() if v.is_floating_point() else v for k, v in sd.items()}, out / f"m{i}.pt")
         models.append({"arch": a.arch, "weights": f"m{i}.pt"})
-    json.dump({"models": models, "h": a.h, "w": a.w, "temp": a.temp, "alpha": a.alpha,
-               "attribute_names": NAMES}, open(out / "config.json", "w"), indent=1)
+    cfg = {"models": models, "h": a.h, "w": a.w, "temp": a.temp, "alpha": a.alpha,
+           "group_weight": a.group_weight, "attribute_names": NAMES}
+    if a.prior_shift:
+        import pandas as pd
+        gt = pd.concat([pd.read_csv(f) for f in a.train_csv])
+        assert list(gt.columns[1:]) == NAMES
+        rate = gt.iloc[:, 1:].to_numpy(dtype=float).mean(0)
+        cfg["prior_shift"] = [round(float(a.prior_shift * (1 - 2 * r)), 6) for r in rate]
+    json.dump(cfg, open(out / "config.json", "w"), indent=1)
     with zipfile.ZipFile(str(out) + ".zip", "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(out.iterdir()):
             z.write(f, f.name)
