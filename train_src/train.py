@@ -28,10 +28,43 @@ DATA = ROOT / "data"
 ANN = ROOT / "starter" / "data" / "annotations" / "task1"
 
 
+class Rows:
+    """Rows of one or more memory-mapped image caches, gathered per batch.
+
+    The caches stay on disk and in the shared page cache, so several jobs on the
+    same caches do not each hold a private copy in RAM.
+    """
+
+    def __init__(self, arrays, src, row):
+        self.arrays, self.src, self.row = arrays, src, row
+
+    @classmethod
+    def of(cls, *arrays):
+        src = np.concatenate([np.full(len(x), k) for k, x in enumerate(arrays)])
+        row = np.concatenate([np.arange(len(x)) for x in arrays])
+        return cls(list(arrays), src, row)
+
+    def __len__(self):
+        return len(self.src)
+
+    def subset(self, mask):
+        return Rows(self.arrays, self.src[mask], self.row[mask])
+
+    def __getitem__(self, idx):
+        idx = np.arange(len(self))[idx] if isinstance(idx, slice) else np.asarray(idx)
+        out = np.empty((len(idx),) + self.arrays[0].shape[1:], self.arrays[0].dtype)
+        for k, x in enumerate(self.arrays):
+            pos = np.flatnonzero(self.src[idx] == k)
+            if len(pos):
+                r = self.row[idx[pos]]; o = np.argsort(r)
+                out[pos[o]] = x[r[o]]
+        return out
+
+
 def split(name, h, w):
     df = pd.read_csv(ANN / name / "gt.csv")
     x = np.load(DATA / f"cache_{name}_{h}x{w}.npy", mmap_mode="r")
-    return np.ascontiguousarray(x), df.iloc[:, 1:].values.astype(np.float32), df.iloc[:, 0].values
+    return x, df.iloc[:, 1:].values.astype(np.float32), df.iloc[:, 0].values
 
 
 def augment(x: torch.Tensor, pad: int) -> torch.Tensor:
