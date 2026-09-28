@@ -180,5 +180,12 @@ def rank_gallery(sample: dict) -> dict:
                           _CFG.get("group_weight", 0.0)).cpu()
             for i in range(0, len(q), 256)]
     s = torch.cat(sims).numpy().astype(np.float32)
+    beta = _CFG.get("query_norm", 0.0)
+    if beta:
+        # each gallery image matches one query: subtract beta * logsumexp over queries,
+        # column blocks so the full matrix is never copied
+        for j in range(0, s.shape[1], 4096):
+            blk = torch.from_numpy(s[:, j:j + 4096])
+            s[:, j:j + 4096] -= beta * torch.logsumexp(blk, 0, keepdim=True).numpy()
     print(f"similarities {s.shape}", flush=True)
     return {"similarities": s}
