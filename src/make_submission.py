@@ -39,6 +39,8 @@ def main():
     ap.add_argument("--prior-shift", type=float, default=0.0,
                     help="lam: subtract lam * (1 - 2 r) from the logits, r = attribute rate in --train-csv")
     ap.add_argument("--train-csv", nargs="*", default=[], help="Track 1 gt.csv files the model was trained on")
+    ap.add_argument("--query-norm", type=float, default=0.0,
+                    help="beta: subtract beta * logsumexp over queries from each gallery image's scores")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out); shutil.rmtree(out, ignore_errors=True); out.mkdir(parents=True)
@@ -53,6 +55,8 @@ def main():
         models.append({"arch": a.arch, "weights": f"m{i}.pt"})
     cfg = {"models": models, "h": a.h, "w": a.w, "temp": a.temp, "alpha": a.alpha,
            "group_weight": a.group_weight, "attribute_names": NAMES}
+    if a.query_norm:
+        cfg["query_norm"] = a.query_norm
     if a.prior_shift:
         import pandas as pd
         gt = pd.concat([pd.read_csv(f) for f in a.train_csv])

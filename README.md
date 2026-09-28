@@ -29,12 +29,20 @@ attributes.
    the training labels. It reduces the pull of frequent attributes toward
    gallery images that match the training prior rather than the query. On
    held-out sources with a ViT-B/16 model it moved mADM from 0.7010 to 0.7020
-   (Market1501) and 0.6253 to 0.6269 (PETA).
-5. Weights may be stored as int8 with one float16 scale per output row
+   (Market1501) and 0.6253 to 0.6269 (PETA). On the test set it made no
+   difference (mADM 0.6134 with it, 0.6135 without), so it is off by default.
+5. Optional query normalisation (`--query-norm 0.5`): every query describes
+   at least one gallery person, so each gallery image should match about one
+   query. Subtracting `beta * logsumexp` of an image's scores over all queries
+   stops images that score high for every query from topping every list. On
+   held-out sources it moved mADM from 0.7010 to 0.7154 (Market1501, KD
+   ViT-B/16), 0.6253 to 0.6304 (PETA, KD ViT-B/16) and 0.5767 to 0.5875
+   (PA100k, ViT-B/16).
+6. Weights may be stored as int8 with one float16 scale per output row
    (keys ending in `.__q` and `.__s`); `run.py` restores them to float16 at
-   load. This keeps the archive at 77 MB; every archive above 99 MB has
-   failed on the evaluation worker so far. On 640 PETA val images the int8 ViT-B/16 gives mAP 0.7487 against
-   0.7497 in float16.
+   load, which keeps the archive at 77 MB instead of 172 MB. On 640 PETA val
+   images the int8 ViT-B/16 gives mAP 0.7487 against 0.7497 in float16, and
+   the two scored 0.6138 and 0.6135 mADM on the test set.
 
 ## Local validation
 
