@@ -17,8 +17,11 @@ CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
 # trained with it stay loadable, although the original CLIP weights use QuickGELU.
 VIT = {
     "vit_l14_clip": ("vit_large_patch14_clip_224.openai", (224, 112), 14, 1024, 24, 16, False),
-    "vit_b16_clip": ("vit_base_patch16_clip_quickgelu_224.openai", (224, 112), 16, 768, 12, 12, True),
     "vit_l14_dfn": ("vit_large_patch14_clip_quickgelu_224.dfn2b", (224, 112), 14, 1024, 24, 16, True),
+    "vit_b16_clip": ("vit_base_patch16_clip_quickgelu_224.openai", (224, 112), 16, 768, 12, 12, True),
+    "vit_b16_dfn": ("vit_base_patch16_clip_224.dfn2b", (224, 112), 16, 768, 12, 12, False),
+    # Native cache size: a 16x8 patch grid instead of 14x7, position embeddings interpolated.
+    "vit_b16_clip_256": ("vit_base_patch16_clip_quickgelu_224.openai", (256, 128), 16, 768, 12, 12, True),
 }
 
 

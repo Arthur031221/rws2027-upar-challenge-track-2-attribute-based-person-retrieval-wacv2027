@@ -140,9 +140,9 @@ def _gallery_logits(gallery: list[dict], nets: list, cfg: dict, can_restart: boo
     last = len(_MODES) - 1
     mode = 0 if cfg.get("flip", True) else last
     out, t0 = [], time.time()
+    t1, n1 = None, 0  # timing starts after the first batch, which carries the warm-up
     with ThreadPoolExecutor(8) as pool:
         for i in range(0, len(gallery), BATCH_SIZE):
-            tb = time.time()
             x = np.stack(list(pool.map(lambda g: _load(g["image_path"], w, h), gallery[i:i + BATCH_SIZE])))
             xr = torch.from_numpy(x).to(_DEV)
             z = 0
@@ -154,7 +154,11 @@ def _gallery_logits(gallery: list[dict], nets: list, cfg: dict, can_restart: boo
                     z = z + ((zb + net(xb.flip(3)).float()) / 2 if mode == 0 else zb)
             out.append((z / len(nets)).float())
             left = len(gallery) - i - len(x)
-            per_image = (time.time() - tb) / len(x)
+            if t1 is None:
+                t1 = time.time()
+                continue
+            n1 += len(x)
+            per_image = (time.time() - t1) / n1
             over = time.time() - _T0[0] + left * per_image > BUDGET_S
             if left > 0 and mode < last and over:
                 mode += 1
