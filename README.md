@@ -4,7 +4,7 @@ This code ranks pedestrian gallery images for a query with 40 binary attributes.
 
 ## Selected model
 
-Submission 958124 scored 0.630940 mADM and ranked first on the leaderboard when checked on 2026-10-03. It uses a CLIP ViT-B/16 student distilled from a CLIP ViT-L teacher. The student was trained for 16 epochs on organizer-provided Track 1 train and validation data with a distillation weight of 0.9 and a horizontally flipped teacher.
+Submission 958124 scored 0.630940 mADM and ranked second when checked on 2026-10-03. The leading displayed score was 0.6315. It uses a CLIP ViT-B/16 student distilled from a CLIP ViT-L teacher. The student was trained for 16 epochs on organizer-provided Track 1 train and validation data with a distillation weight of 0.9 and a horizontally flipped teacher.
 
 For the final weights, the KD2 seed 0 checkpoint was averaged with three copies of the existing three-seed ViT-B/16 Track 1 soup. WiSE-FT then blended 80 percent of the averaged backbone with the pretrained CLIP weights. The trained attribute head was retained. The submission stores the result in float16.
 
