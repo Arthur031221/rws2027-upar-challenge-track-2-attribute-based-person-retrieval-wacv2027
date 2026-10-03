@@ -1,80 +1,31 @@
 # UPAR Challenge Track 2: attribute-based person retrieval
 
-Entry for Track 2 of the UPAR Challenge at the RWS workshop, WACV 2027
-(Codabench competition 18196). A query is a full 40-bit binary attribute
-vector (age, gender, hair, clothing length, colour and type, accessories). The
-task is to rank a gallery of pedestrian crops from an unseen domain so that
-people whose 40 attributes all equal the query come first. The ranking metric
-is mADM (mean average degree of match), which keeps the structure of average
-precision but credits images ranked early that agree with the query on most
-attributes.
+This code ranks pedestrian images for a query containing 40 binary attributes. A gallery image is an exact match when all 40 attributes agree with the query. The leaderboard metric is mean average degree of match (mADM), which rewards early exact matches and gives partial credit to near matches.
 
-## Approach
+## Selected model
 
-1. Attribute model: the Track 1 pedestrian attribute classifier (torchvision
-   ConvNeXt-Small, ImageNet-1k weights, 40-way head, 256x128 input, weighted
-   BCE, EMA, 10 epochs on the organisers' train split). Training code:
-   the Track 1 repository (`train.py`, `model.py`).
-2. Gallery: attribute logits for every image, averaged over the image and its
-   horizontal flip.
-3. Query score: Bernoulli log-likelihood of the query vector,
-   `sum_a q_a log p_a + (1 - q_a) log(1 - p_a)`, computed as two matrix
-   products (no Q x G x 40 tensor), with logits divided by a temperature of
-   1.5. For a query with exactly one positive in a mutually exclusive group
-   (age, hair length, upper colour, lower colour, lower-body type), half of
-   that group's score is the categorical log-probability of the positive,
-   with the sigmoids renormalised over the group. Returned as `similarities`.
-4. Optional prior shift (`--prior-shift 0.5`): before scoring, subtract
-   `lam * (1 - 2 r_a)` from each logit, where `r_a` is attribute a's rate in
-   the training labels. It reduces the pull of frequent attributes toward
-   gallery images that match the training prior rather than the query. On
-   held-out sources with a ViT-B/16 model it moved mADM from 0.7010 to 0.7020
-   (Market1501) and 0.6253 to 0.6269 (PETA). On the test set it made no
-   difference (mADM 0.6134 with it, 0.6135 without), so it is off by default.
-5. Optional query normalisation (`--query-norm 0.5`): every query describes
-   at least one gallery person, so each gallery image should match about one
-   query. Subtracting `beta * logsumexp` of an image's scores over all queries
-   stops images that score high for every query from topping every list. On
-   held-out sources it moved mADM from 0.7010 to 0.7154 (Market1501, KD
-   ViT-B/16), 0.6253 to 0.6304 (PETA, KD ViT-B/16) and 0.5767 to 0.5875
-   (PA100k, ViT-B/16).
-6. Weights may be stored as int8 with one float16 scale per output row
-   (keys ending in `.__q` and `.__s`). `run.py` restores them to float16 at
-   load, which keeps the archive at 77 MB instead of 172 MB. On 640 PETA val
-   images the int8 ViT-B/16 gives mAP 0.7487 against 0.7497 in float16, and
-   the two scored 0.6138 and 0.6135 mADM on the test set.
+The current selected package, submission 950922, uses a CLIP ViT-B/16 attribute model. Its weights are the WiSE-FT 0.8 blend of a three-seed weight average trained on organizer-provided Track 1 data. The trained attribute head is kept unchanged while the backbone is blended with the original CLIP weights.
 
-## Local validation
+For each gallery image, inference averages the model logits for the image and its horizontal flip. The scorer ranks each query with the Bernoulli log-likelihood of its 40 attributes, using temperature 1.5. For a query with one positive attribute in an exclusive group, the scorer blends in a categorical log-probability with weight 0.5. Query normalisation subtracts 0.5 times the log-sum-exp across queries for each gallery image.
 
-The attribute model never saw the val split (33,407 images, 3,462 distinct
-attribute vectors). `src/val_eval.py` treats every distinct vector in a gallery
-as a query and reproduces the metrics of the Evaluation page (`src/retrieval.py`).
+The inference package runs without network access. It stores model weights in float16 and leaves CPU linear layers unquantised by default. The entry point can drop flip averaging if its runtime estimate approaches the one-hour limit.
 
-| scorer | val all | Market1501 | PA100k | PETA |
-|---|---|---|---|---|
-| L1 on probabilities (organiser recipe) | 0.6568 | 0.6782 | 0.6369 | 0.6825 |
-| log-likelihood | 0.6985 | 0.7161 | 0.6664 | 0.7395 |
-| log-likelihood, T 1.5, group weight 0.5 (submitted) | 0.7012 | 0.7223 | 0.6740 | 0.7402 |
+## Train and package
 
-The val split shares domains with the training data, so the temperature and
-group weight were chosen on leave-one-source-out models instead (a ConvNeXt-S
-trained without Market1501, and one without PETA, each scored on the held-out
-source's val gallery). There the change moves mADM from 0.6422 to 0.6488 on
-Market1501 and from 0.5277 to 0.5386 on PETA. Per-attribute temperatures and a
-full group softmax (weight 1) lowered both held-out scores.
-
-## Reproduce
+The training scripts are in `train_src/`. They use the organizer-provided training data and the CLIP ViT-B/16 foundation weights. Train three seeds with the same recipe. Average matching tensors across the three checkpoints, then blend each backbone tensor as `0.8 * soup + 0.2 * pretrained`. Keep the soup classifier head. Use the resulting checkpoint with:
 
 ```bash
-cd src
-python val_eval.py --ckpt <track1 checkpoint> --arch convnext_small \
-    --cache <val image cache 256x128 .npy> --ann <starter>/data/annotations/task2/val --out ../runs/val
-python make_submission.py --ckpt <track1 checkpoint> --arch convnext_small --out ../runs/sub
-# with the log-likelihood settings above and the prior shift
-python make_submission.py --ckpt <track1 checkpoint> --arch convnext_small --temp 1.5 --group-weight 0.5 \
-    --prior-shift 0.5 --train-csv <starter>/data/annotations/task1/{train,val}/gt.csv --out ../runs/sub
-# upload ../runs/sub.zip (run.py at the archive root)
+python code/src/make_submission.py \
+    --ckpt <wise-checkpoint> \
+    --arch vit_b16_clip --h 256 --w 128 \
+    --temp 1.5 --group-weight 0.5 --query-norm 0.5 \
+    --out runs/sub_wise
 ```
 
-`submission/run.py` exposes `load_model()` and `rank_gallery(sample)` and
-needs only torch, torchvision, numpy and Pillow (pytorch/pytorch:2.4.1 image).
+The command writes a zip whose root contains `run.py`, `metadata.yaml`, the model code, the configuration and the float16 checkpoint. The package enables flip averaging and disables CPU int8 quantisation by default. Pass `--cpu-int8` only when the quantised CPU path has been validated. Pass `--no-flip` only when the runtime limit requires it.
+
+`train_src/train.py` trains the attribute model. `train_src/train_kd.py` trains a student from a frozen teacher. `src/make_submission.py` builds the inference package. `submission/run.py` implements `load_model()` and `rank_gallery(sample)`.
+
+## Validation
+
+Local retrieval measurements use the official Track 2 validation annotations. Model selection uses leave-one-source-out folds and the same frozen scorer settings as the submitted package. Test images are not used for training or model selection.

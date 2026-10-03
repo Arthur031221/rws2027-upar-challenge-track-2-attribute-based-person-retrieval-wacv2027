@@ -36,6 +36,10 @@ def main():
     ap.add_argument("--temp", type=float, default=1.0)
     ap.add_argument("--alpha", type=float, default=0.0)
     ap.add_argument("--group-weight", type=float, default=0.0)
+    ap.add_argument("--cpu-int8", action="store_true",
+                    help="dynamically quantise linear layers on CPU")
+    ap.add_argument("--no-flip", action="store_true",
+                    help="skip horizontal-flip averaging")
     ap.add_argument("--prior-shift", type=float, default=0.0,
                     help="lam: subtract lam * (1 - 2 r) from the logits, r = attribute rate in --train-csv")
     ap.add_argument("--train-csv", nargs="*", default=[], help="Track 1 gt.csv files the model was trained on")
@@ -54,7 +58,8 @@ def main():
         torch.save({k: v.half() if v.is_floating_point() else v for k, v in sd.items()}, out / f"m{i}.pt")
         models.append({"arch": a.arch, "weights": f"m{i}.pt"})
     cfg = {"models": models, "h": a.h, "w": a.w, "temp": a.temp, "alpha": a.alpha,
-           "group_weight": a.group_weight, "attribute_names": NAMES}
+           "group_weight": a.group_weight, "attribute_names": NAMES,
+           "cpu_int8": a.cpu_int8, "flip": not a.no_flip}
     if a.query_norm:
         cfg["query_norm"] = a.query_norm
     if a.prior_shift:
