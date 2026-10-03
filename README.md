@@ -2,7 +2,7 @@
 
 Entry for Track 2 of the UPAR Challenge at the RWS workshop, WACV 2027
 (Codabench competition 18196). A query is a full 40-bit binary attribute
-vector (age, gender, hair, clothing length, colour and type, accessories); the
+vector (age, gender, hair, clothing length, colour and type, accessories). The
 task is to rank a gallery of pedestrian crops from an unseen domain so that
 people whose 40 attributes all equal the query come first. The ranking metric
 is mADM (mean average degree of match), which keeps the structure of average
@@ -39,7 +39,7 @@ attributes.
    ViT-B/16), 0.6253 to 0.6304 (PETA, KD ViT-B/16) and 0.5767 to 0.5875
    (PA100k, ViT-B/16).
 6. Weights may be stored as int8 with one float16 scale per output row
-   (keys ending in `.__q` and `.__s`); `run.py` restores them to float16 at
+   (keys ending in `.__q` and `.__s`). `run.py` restores them to float16 at
    load, which keeps the archive at 77 MB instead of 172 MB. On 640 PETA val
    images the int8 ViT-B/16 gives mAP 0.7487 against 0.7497 in float16, and
    the two scored 0.6138 and 0.6135 mADM on the test set.
