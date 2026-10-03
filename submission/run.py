@@ -14,7 +14,7 @@ few batches without flip, the gallery restarts from the first image on the
 fallback models, so every gallery image is scored by the same models.
 
 The worker's memory cap is about 2 GB. Weights are memory-mapped into a model
-built on the meta device; on a GPU they run in float32 with bfloat16 autocast,
+built on the meta device. On a GPU they run in float32 with bfloat16 autocast,
 on the CPU the linear layers are quantised to int8 at load time unless the
 config sets "cpu_int8" to false.
 """

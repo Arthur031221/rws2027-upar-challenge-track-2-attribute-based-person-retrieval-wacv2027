@@ -50,7 +50,8 @@ def main():
     out = Path(a.out); shutil.rmtree(out, ignore_errors=True); out.mkdir(parents=True)
     for f in ["run.py", "metadata.yaml"]:
         shutil.copy(SUB / f, out / f)
-    for f in ["model.py", "vit.py", "retrieval.py"]:
+    shutil.copy(SUB / "model.py", out / "model.py")
+    for f in ["vit.py", "retrieval.py"]:
         shutil.copy(HERE / f, out / f)
     models = []
     for i, c in enumerate(a.ckpt):

@@ -32,7 +32,8 @@ def loglik_scores(q: torch.Tensor, z: torch.Tensor, temp: float = 1.0, alpha: fl
     log-probability of the positive (sigmoids renormalised over the group) and
     the independent Bernoulli terms, weighted group_weight and 1 - group_weight.
     """
-    q = q.float(); z = z.float() / temp
+    q = q.float()
+    z = z.float() / temp
     if group_weight:
         grouped = {j for g in GROUPS for j in g}
         solo = [j for j in range(q.shape[1]) if j not in grouped]
@@ -54,7 +55,8 @@ def loglik_scores(q: torch.Tensor, z: torch.Tensor, temp: float = 1.0, alpha: fl
 
 def l1_scores(q: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     """Expected attribute agreement (the organisers' L1 baseline, as a similarity)."""
-    p = torch.sigmoid(z.float()); q = q.float()
+    p = torch.sigmoid(z.float())
+    q = q.float()
     return q @ p.T + (1 - q) @ (1 - p).T
 
 
@@ -62,10 +64,11 @@ def l1_scores(q: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
 def retrieval_metrics(sim: torch.Tensor, q: torch.Tensor, gt: torch.Tensor, chunk: int = 128) -> dict[str, float]:
     """mADM, mAP, Rank-1/5/10 and mINP as defined on the Evaluation page.
 
-    sim: (Q, G) similarities (larger first; ties keep gallery order),
+    sim: (Q, G) similarities, larger values rank first and ties keep gallery order,
     q: (Q, 40) queries, gt: (G, 40) gallery labels. A match is an exact 40-bit equality.
     """
-    q = q.float(); gt = gt.float()
+    q = q.float()
+    gt = gt.float()
     nq, ng = sim.shape
     ar = torch.arange(1, ng + 1, device=sim.device, dtype=torch.float64)
     acc = {k: 0.0 for k in ["mADM", "mAP", "Rank-1", "Rank-5", "Rank-10", "mINP"]}
